@@ -1,0 +1,71 @@
+Metadata-Version: 2.4
+Name: tg-digest
+Version: 0.1.0
+Summary: Telegram daily digest prototype for tutorial and troubleshooting content
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: httpx<1.0,>=0.27
+Provides-Extra: dev
+Requires-Dist: mypy<2.0,>=1.10; extra == "dev"
+Requires-Dist: pytest<9.0,>=8.2; extra == "dev"
+Requires-Dist: ruff<0.8,>=0.6; extra == "dev"
+
+# tg-digest
+
+一个用于实验的 Telegram 内容提取项目。
+
+目标：从群组或频道消息中，每天筛选 1-3 条适合写成文章的候选内容，主题聚焦在 APP 使用教学、故障排查和实用修复方案。
+
+## 当前阶段
+
+- 第一版优先支持 `Bot API polling`
+- `MTProto` 已预留抽象接口，但暂未接入具体实现
+- 聊天内容按天存储为 JSON 文件
+
+## 推荐命令
+
+如果安装了 `uv`：
+
+```bash
+uv venv
+uv sync --extra dev
+uv run python -m tg_digest
+uv run ruff check .
+uv run ruff format .
+uv run mypy src tests
+uv run pytest
+uv run pytest tests/test_select.py::test_select_candidates_limits_count
+```
+
+如果没有 `uv`：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+python -m tg_digest
+pytest
+```
+
+## 环境变量
+
+参考 `.env.example`。
+
+- `TG_DIGEST_BOT_TOKEN`: Telegram Bot Token
+- `TG_DIGEST_BOT_ALLOWED_CHAT_IDS`: 允许采集的 chat id，逗号分隔
+- `TG_DIGEST_DATA_DIR`: 数据目录
+- `TG_DIGEST_TIMEZONE`: 业务时区，当前默认 `UTC`
+
+## 数据目录
+
+每日运行会在 `data/daily/YYYY-MM-DD/` 下生成：
+
+- `messages.json`
+- `candidates.json`
+- `summary.json`
+- `cursors.json`
+
+## 说明
+
+Bot API 在历史消息拉取方面能力有限，因此当前实现更偏向增量采集与本地归档。
+后续接入 `MTProto` 后，可用于补拉历史消息。
