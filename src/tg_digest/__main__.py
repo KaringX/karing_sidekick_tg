@@ -4,13 +4,17 @@ import argparse
 import asyncio
 import contextlib
 import json
+import sys
 from datetime import UTC, datetime
+from typing import TextIO
 
 from tg_digest.adapters.json_storage import JsonDailyStorage
 from tg_digest.adapters.telegram_bot_api import BotApiCollector
 from tg_digest.config import load_config
-from tg_digest.errors import UnsupportedModeError
+from tg_digest.errors import CollectorError, TgDigestError, UnsupportedModeError
 from tg_digest.services.daily_digest import DailyDigestService
+
+WORKER_RETRY_DELAY_SECONDS = 10
 
 
 def _build_service() -> DailyDigestService:
@@ -39,16 +43,36 @@ async def _run_worker(service: DailyDigestService) -> int:
             {
                 "status": "worker_started",
                 "polling_interval_seconds": service.config.polling_interval_seconds,
+                "retry_delay_seconds": WORKER_RETRY_DELAY_SECONDS,
                 "allowed_chat_ids": service.config.allowed_chat_ids,
             },
             ensure_ascii=False,
         )
     )
     while True:
-        target_day = datetime.now(UTC).date()
+        payload, sleep_seconds, stream = await _run_worker_iteration(service)
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=stream)
+        await asyncio.sleep(sleep_seconds)
+
+
+async def _run_worker_iteration(
+    service: DailyDigestService,
+) -> tuple[dict[str, object], int, TextIO]:
+    target_day = datetime.now(UTC).date()
+    try:
         summary = await service.run_for_day(target_day)
-        print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
-        await asyncio.sleep(service.config.polling_interval_seconds)
+    except CollectorError as exc:
+        return (
+            {
+                "status": "retrying_after_error",
+                "error": str(exc),
+                "retry_in_seconds": WORKER_RETRY_DELAY_SECONDS,
+            },
+            WORKER_RETRY_DELAY_SECONDS,
+            sys.stderr,
+        )
+
+    return summary, service.config.polling_interval_seconds, sys.stdout
 
 
 async def _main(mode: str) -> int:
@@ -73,7 +97,11 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     with contextlib.suppress(KeyboardInterrupt):
-        return asyncio.run(_main(args.mode))
+        try:
+            return asyncio.run(_main(args.mode))
+        except TgDigestError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     return 130
 
 

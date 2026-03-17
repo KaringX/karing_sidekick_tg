@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import pytest
 
 from tg_digest.adapters.telegram_bot_api import BotApiCollector
+from tg_digest.errors import CollectorError
 from tg_digest.models import ChatRef
 
 
@@ -129,3 +131,19 @@ def test_bot_api_adapter_keeps_fetching_until_offset_catches_up() -> None:
     assert calls == [None, "12"]
     assert cursor is not None
     assert cursor.value == "13"
+
+
+def test_bot_api_adapter_wraps_connect_error() -> None:
+    class PatchedCollector(BotApiCollector):
+        async def _request_updates(
+            self, url: str, params: dict[str, int]
+        ) -> httpx.Response:
+            request = httpx.Request("GET", url, params=params)
+            raise httpx.ConnectError("network down", request=request)
+
+    collector = PatchedCollector(bot_token="token")
+
+    with pytest.raises(CollectorError) as exc_info:
+        asyncio.run(collector._get_updates(offset=None, limit=1))
+
+    assert str(exc_info.value) == "Bot API getUpdates request failed: ConnectError"

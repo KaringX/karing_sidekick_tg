@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from json import JSONDecodeError
 from typing import Any
 
 import httpx
@@ -97,18 +98,31 @@ class BotApiCollector:
             params["offset"] = int(offset)
 
         url = f"{self.base_url}/bot{self.bot_token}/getUpdates"
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(url, params=params)
+        try:
+            response = await self._request_updates(url=url, params=params)
+        except httpx.HTTPError as exc:
+            raise CollectorError(
+                f"Bot API getUpdates request failed: {exc.__class__.__name__}"
+            ) from exc
 
         if response.status_code >= 400:
             raise CollectorError(
                 f"Bot API getUpdates failed with status {response.status_code}"
             )
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except JSONDecodeError as exc:
+            raise CollectorError("Bot API getUpdates returned invalid JSON") from exc
         if not payload.get("ok"):
             raise CollectorError(f"Bot API getUpdates failed: {payload}")
         result = payload.get("result", [])
         if not isinstance(result, list):
             raise CollectorError("Bot API getUpdates returned a non-list result")
         return result
+
+    async def _request_updates(
+        self, url: str, params: dict[str, int]
+    ) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            return await client.get(url, params=params)
