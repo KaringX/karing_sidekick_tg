@@ -158,6 +158,63 @@ def test_run_once_awaits_recovery_notification(
     assert '"stored": 1' in output
 
 
+def test_run_media_down_waits_when_queue_is_empty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[str] = []
+
+    class StopLoop(Exception):
+        pass
+
+    class FakeStorage:
+        def close(self) -> None:
+            return None
+
+    class FakeService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run(
+            self, kind: str, start_id: int | None = None
+        ) -> dict[str, int | str]:
+            self.calls += 1
+            calls.append(f"run:{kind}:{start_id}")
+            return {
+                "run_status": "ok",
+                "kind": kind,
+                "start_after_id": 0,
+                "processed": 0,
+                "downloaded": 0,
+                "skipped_existing": 0,
+                "skipped_missing_media": 0,
+                "failed": 0,
+            }
+
+    async def fake_notify_recovery(mode: str) -> None:
+        calls.append(f"notify:{mode}")
+
+    async def fake_sleep(seconds: float) -> None:
+        calls.append(f"sleep:{int(seconds)}")
+        raise StopLoop
+
+    monkeypatch.setattr(main_module, "load_config", lambda: cast(Any, object()))
+    monkeypatch.setattr(main_module, "_build_storage", lambda config: FakeStorage())
+    monkeypatch.setattr(
+        main_module,
+        "_build_media_download_service",
+        lambda config, storage: FakeService(),
+    )
+    monkeypatch.setattr(main_module, "_notify_recovery", fake_notify_recovery)
+    monkeypatch.setattr(cast(Any, main_module).asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(StopLoop):
+        asyncio.run(main_module._run_media_down(Namespace(kind="photo", start_id=None)))
+
+    output = capsys.readouterr().out
+    assert '"processed": 0' in output
+    assert calls == ["run:photo:None", "notify:media-down", "sleep:600"]
+
+
 def test_run_check_reports_success_for_ready_dependencies(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -168,6 +225,8 @@ def test_run_check_reports_success_for_ready_dependencies(
         error_chat_id="-1009",
         polling_batch_size=100,
         polling_interval_seconds=30,
+        clear_messages_days=None,
+        clear_media_days=None,
         database=DatabaseConfig(
             host="127.0.0.1",
             port=5432,

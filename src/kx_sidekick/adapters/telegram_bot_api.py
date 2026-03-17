@@ -183,6 +183,29 @@ class BotApiNotifier:
         )
         self._require_dict_result(result, "Telegram sendMessage returned a non-object")
 
+    async def get_file(self, file_id: str) -> dict[str, Any]:
+        result = await self._call_api(
+            method_name="getFile",
+            payload={"file_id": file_id},
+        )
+        return self._require_dict_result(
+            result,
+            "Telegram getFile returned a non-object",
+        )
+
+    async def download_file(self, file_path: str) -> bytes:
+        url = f"{self.base_url}/file/bot{self.bot_token}/{file_path}"
+        try:
+            response = await self._get_file_content(url)
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            raise NotificationError("Telegram file download request failed") from exc
+
+        if response.status_code >= 400:
+            raise NotificationError(
+                f"Telegram file download failed with status {response.status_code}"
+            )
+        return response.content
+
     async def _call_api(
         self, method_name: str, payload: dict[str, object]
     ) -> dict[str, Any] | list[Any]:
@@ -229,3 +252,8 @@ class BotApiNotifier:
         timeout = httpx.Timeout(API_POST_TIMEOUT_SECONDS)
         async with httpx.AsyncClient(timeout=timeout) as client:
             return await client.post(url, json=payload)
+
+    async def _get_file_content(self, url: str) -> httpx.Response:
+        timeout = httpx.Timeout(REQUEST_TIMEOUT_SECONDS)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            return await client.get(url)

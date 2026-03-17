@@ -22,8 +22,14 @@ from kx_sidekick.config import (
     load_config,
     load_error_notification_config,
 )
-from kx_sidekick.errors import KxSidekickError, UnsupportedModeError
+from kx_sidekick.errors import ConfigError, KxSidekickError, UnsupportedModeError
 from kx_sidekick.ingest.local_dedupe import LocalDedupeStore
+from kx_sidekick.services.cleanup import CleanupService
+from kx_sidekick.services.media_download import (
+    DEFAULT_MEDIA_KIND,
+    MediaDownloadCursorStore,
+    MediaDownloadService,
+)
 from kx_sidekick.services.telegram_ingestion import TelegramIngestionService
 
 LOGGER: Final = logging.getLogger("kx_sidekick")
@@ -33,6 +39,7 @@ FAIL_EMOJI: Final = "❌"
 WARN_EMOJI: Final = "⚠️"
 SUPERVISOR_CONFIG_PATH: Final = Path("deploy/supervisor/kx_sidekick.conf")
 SUPERVISOR_SECTION: Final = "program:kx_sidekick"
+MEDIA_DOWN_IDLE_SECONDS: Final = 600
 
 
 def _configure_logging() -> None:
@@ -42,7 +49,10 @@ def _configure_logging() -> None:
     )
 
 
-def _build_service(config: AppConfig) -> TelegramIngestionService:
+def _build_service(
+    config: AppConfig,
+    storage: PostgresStorage | None = None,
+) -> TelegramIngestionService:
     if config.telegram_mode not in {"bot_api", "hybrid"}:
         raise UnsupportedModeError("Only bot_api polling is wired in the current phase")
 
@@ -50,8 +60,8 @@ def _build_service(config: AppConfig) -> TelegramIngestionService:
         bot_token=config.bot_token or "",
         allowed_chat_ids=config.allowed_chat_ids,
     )
-    storage = PostgresStorage(config.database)
-    storage.ensure_connected()
+    if storage is None:
+        storage = _build_storage(config)
     dedupe_store = LocalDedupeStore(config.dedupe)
     return TelegramIngestionService(
         collector=collector,
@@ -61,8 +71,37 @@ def _build_service(config: AppConfig) -> TelegramIngestionService:
     )
 
 
+def _build_storage(config: AppConfig) -> PostgresStorage:
+    storage = PostgresStorage(config.database)
+    storage.ensure_connected()
+    return storage
+
+
+def _build_cleanup_service(
+    config: AppConfig, storage: PostgresStorage
+) -> CleanupService:
+    return CleanupService(storage=storage, state_dir=config.dedupe.state_dir)
+
+
+def _build_media_download_service(
+    config: AppConfig, storage: PostgresStorage
+) -> MediaDownloadService:
+    return MediaDownloadService(
+        storage=storage,
+        telegram=BotApiNotifier(bot_token=config.bot_token or ""),
+        cursor_store=MediaDownloadCursorStore(config.dedupe.state_dir),
+        batch_size=config.polling_batch_size,
+    )
+
+
 def _print_check_result(status: str, label: str, detail: str) -> None:
     print(f"{status} {label}: {detail}")
+
+
+def _require_positive_cli_int(value: int | None, name: str) -> int | None:
+    if value is not None and value <= 0:
+        raise ConfigError(f"{name} must be greater than 0")
+    return value
 
 
 def _check_directory_writable(path: Path, label: str) -> bool:
@@ -418,13 +457,83 @@ async def _run_once(service: TelegramIngestionService) -> int:
     return 0
 
 
-async def _run_worker(service: TelegramIngestionService, interval_seconds: int) -> int:
+async def _run_media_down(args: argparse.Namespace) -> int:
+    start_id = _require_positive_cli_int(args.start_id, "--start-id")
+    config = load_config()
+    storage = _build_storage(config)
+    try:
+        service = _build_media_download_service(config, storage)
+        next_start_id = start_id
+        while True:
+            summary = await service.run(
+                kind=args.kind,
+                start_id=next_start_id,
+            )
+            await _notify_recovery("media-down")
+            print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+            next_start_id = None
+
+            processed = summary.get("processed")
+            if processed != 0:
+                continue
+
+            LOGGER.info(
+                "media_down_idle_wait kind=%s wait_seconds=%s",
+                args.kind,
+                MEDIA_DOWN_IDLE_SECONDS,
+            )
+            await asyncio.sleep(MEDIA_DOWN_IDLE_SECONDS)
+    finally:
+        storage.close()
+    return 0
+
+
+async def _run_clear(args: argparse.Namespace) -> int:
+    config = load_config()
+    messages_days = (
+        _require_positive_cli_int(args.messages_days, "--messages-days")
+        or config.clear_messages_days
+    )
+    media_days = (
+        _require_positive_cli_int(args.media_days, "--media-days")
+        or config.clear_media_days
+    )
+    storage = _build_storage(config)
+    try:
+        service = _build_cleanup_service(config, storage)
+        summary = service.run(
+            messages_days=messages_days,
+            media_days=media_days,
+        )
+    finally:
+        storage.close()
+    await _notify_recovery("clear")
+    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+async def _run_worker(
+    service: TelegramIngestionService,
+    cleanup_service: CleanupService,
+    clear_messages_days: int | None,
+    clear_media_days: int | None,
+    interval_seconds: int,
+) -> int:
     LOGGER.info(
         "worker_started polling_interval_seconds=%s polling_batch_size=%s",
         interval_seconds,
         service.polling_batch_size,
     )
     while True:
+        cleanup_summary = cleanup_service.run_daily_if_due(
+            messages_days=clear_messages_days,
+            media_days=clear_media_days,
+        )
+        if cleanup_summary is not None:
+            LOGGER.info(
+                "worker_cleanup_completed stats=%s",
+                json.dumps(cleanup_summary, sort_keys=True),
+            )
         summary = await service.run_once()
         await _notify_recovery("worker")
         LOGGER.info(
@@ -433,14 +542,25 @@ async def _run_worker(service: TelegramIngestionService, interval_seconds: int) 
         await asyncio.sleep(interval_seconds)
 
 
-async def _main(mode: str) -> int:
-    if mode == "check":
+async def _main(args: argparse.Namespace) -> int:
+    if args.mode == "check":
         return await _run_check()
+    if args.mode == "media-down":
+        return await _run_media_down(args)
+    if args.mode == "clear":
+        return await _run_clear(args)
 
     config = load_config()
-    service = _build_service(config)
-    if mode == "worker":
-        return await _run_worker(service, config.polling_interval_seconds)
+    storage = _build_storage(config)
+    service = _build_service(config, storage=storage)
+    if args.mode == "worker":
+        return await _run_worker(
+            service,
+            _build_cleanup_service(config, storage),
+            config.clear_messages_days,
+            config.clear_media_days,
+            config.polling_interval_seconds,
+        )
     return await _run_once(service)
 
 
@@ -450,8 +570,32 @@ def _parse_args() -> argparse.Namespace:
         "mode",
         nargs="?",
         default="run-once",
-        choices=("run-once", "worker", "check"),
+        choices=("run-once", "worker", "check", "media-down", "clear"),
         help="run once, stay in polling mode, or validate runtime dependencies",
+    )
+    parser.add_argument(
+        "--start-id",
+        type=int,
+        default=None,
+        help="start downloading media from this message id",
+    )
+    parser.add_argument(
+        "--kind",
+        choices=("photo", "all"),
+        default=DEFAULT_MEDIA_KIND,
+        help="limit media-down to one media kind or all supported kinds",
+    )
+    parser.add_argument(
+        "--messages-days",
+        type=int,
+        default=None,
+        help="delete database messages older than this many days during clear",
+    )
+    parser.add_argument(
+        "--media-days",
+        type=int,
+        default=None,
+        help="delete media directories older than this many days during clear",
     )
     return parser.parse_args()
 
@@ -461,7 +605,7 @@ def main() -> int:
     args = _parse_args()
     with contextlib.suppress(KeyboardInterrupt):
         try:
-            return asyncio.run(_main(args.mode))
+            return asyncio.run(_main(args))
         except KxSidekickError as exc:
             LOGGER.exception("application_failed error=%s", exc)
             _notify_exit_error(exc, args.mode)

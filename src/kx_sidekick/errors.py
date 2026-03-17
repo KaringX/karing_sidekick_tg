@@ -20,3 +20,7 @@ class UnsupportedModeError(KxSidekickError):
 
 class NotificationError(KxSidekickError):
     """Raised when sending an exit notification fails."""
+
+
+class MediaDownloadError(KxSidekickError):
+    """Raised when media download processing fails."""

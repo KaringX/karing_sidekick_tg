@@ -43,7 +43,7 @@ the worker to send a Telegram alert before exiting on failure, also set
 
 ## Initialize PostgreSQL
 
-Run the schema in `docs/table.sql` against the target database:
+Run the schema in `deploy/table.sql` against the target database:
 
 ```bash
 psql \
@@ -51,7 +51,7 @@ psql \
   -p "$KX_SIDEKICK_DB_PORT" \
   -U "$KX_SIDEKICK_DB_USER" \
   -d "$KX_SIDEKICK_DB_NAME" \
-  -f docs/table.sql
+  -f deploy/table.sql
 ```
 
 If you do not want to export shell variables first, replace them with explicit values.
@@ -88,6 +88,7 @@ Then reload supervisor:
 sudo supervisorctl reread
 sudo supervisorctl update
 sudo supervisorctl status kx_sidekick
+sudo supervisorctl status kx_sidekick_media_down
 ```
 
 Start or restart the worker:
@@ -95,12 +96,21 @@ Start or restart the worker:
 ```bash
 sudo supervisorctl start kx_sidekick
 sudo supervisorctl restart kx_sidekick
+sudo supervisorctl start kx_sidekick_media_down
+sudo supervisorctl restart kx_sidekick_media_down
 ```
+
+`kx_sidekick_media_down` keeps `media-down` running so new photo media gets
+downloaded in the background. When the backlog is empty, `media-down` logs an
+idle wait message, sleeps for 10 minutes, and then checks again. `worker` handles daily cleanup
+internally once per UTC day when `KX_SIDEKICK_CLEAR_MESSAGES_DAYS` and/or
+`KX_SIDEKICK_CLEAR_MEDIA_DAYS` is configured.
 
 After the process is up, complete these runtime checks:
 
 ```bash
 sudo supervisorctl status kx_sidekick
+sudo supervisorctl status kx_sidekick_media_down
 tail -f /opt/KaringX/karing_sidekick/logs/kx_sidekick.stderr.log
 ls -l /opt/KaringX/karing_sidekick/state/dedupe_cache.json
 ```
@@ -109,19 +119,26 @@ Expected results:
 
 - `logs/kx_sidekick.stderr.log` does not show repeated startup, Telegram, or PostgreSQL errors
 - `state/dedupe_cache.json` exists after the worker begins processing messages
+- `logs/kx_sidekick_media_down.stderr.log` does not show repeated media download failures
 
 ## Logs and Runtime Files
 
 - stdout log: `/opt/KaringX/karing_sidekick/logs/kx_sidekick.stdout.log`
 - stderr log: `/opt/KaringX/karing_sidekick/logs/kx_sidekick.stderr.log`
+- media-down stdout log: `/opt/KaringX/karing_sidekick/logs/kx_sidekick_media_down.stdout.log`
+- media-down stderr log: `/opt/KaringX/karing_sidekick/logs/kx_sidekick_media_down.stderr.log`
 - local dedupe state: `/opt/KaringX/karing_sidekick/state/dedupe_cache.json`
+- media download cursor: `/opt/KaringX/karing_sidekick/state/media_download_cursor.json`
+- daily cleanup state: `/opt/KaringX/karing_sidekick/state/daily_cleanup_state.json`
 
 Quick checks:
 
 ```bash
 sudo supervisorctl status kx_sidekick
+sudo supervisorctl status kx_sidekick_media_down
 tail -f /opt/KaringX/karing_sidekick/logs/kx_sidekick.stdout.log
 tail -f /opt/KaringX/karing_sidekick/logs/kx_sidekick.stderr.log
+tail -f /opt/KaringX/karing_sidekick/logs/kx_sidekick_media_down.stderr.log
 ```
 
 ## Upgrade Steps
@@ -131,9 +148,10 @@ cd /opt/KaringX/karing_sidekick
 git pull
 uv sync --extra dev
 sudo supervisorctl restart kx_sidekick
+sudo supervisorctl restart kx_sidekick_media_down
 ```
 
-If the database schema changes, run `docs/table.sql` again before restarting.
+If the database schema changes, run `deploy/table.sql` again before restarting.
 
 ## Failure Model
 

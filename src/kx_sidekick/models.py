@@ -116,6 +116,14 @@ class FetchCursor:
     updated_at_utc: datetime
 
 
+@dataclass(frozen=True)
+class MediaDownloadRecord:
+    id: int
+    posted_at_utc: datetime
+    media_kind: str
+    media: dict[str, object]
+
+
 def _optional_str(value: object) -> str | None:
     return str(value) if value is not None else None
 

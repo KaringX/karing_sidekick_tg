@@ -44,6 +44,19 @@ def _get_positive_int(name: str, default: str) -> int:
     return value
 
 
+def _get_optional_positive_int(name: str) -> int | None:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return None
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be an integer") from exc
+    if value <= 0:
+        raise ConfigError(f"{name} must be greater than 0")
+    return value
+
+
 @dataclass(frozen=True)
 class DatabaseConfig:
     host: str
@@ -75,6 +88,8 @@ class AppConfig:
     error_chat_id: str | None
     polling_batch_size: int
     polling_interval_seconds: int
+    clear_messages_days: int | None
+    clear_media_days: int | None
     database: DatabaseConfig
     dedupe: DedupeConfig
 
@@ -150,6 +165,10 @@ def load_config() -> AppConfig:
         polling_interval_seconds=_get_positive_int(
             "KX_SIDEKICK_POLLING_INTERVAL_SECONDS", "30"
         ),
+        clear_messages_days=_get_optional_positive_int(
+            "KX_SIDEKICK_CLEAR_MESSAGES_DAYS"
+        ),
+        clear_media_days=_get_optional_positive_int("KX_SIDEKICK_CLEAR_MEDIA_DAYS"),
         database=database,
         dedupe=dedupe,
     )

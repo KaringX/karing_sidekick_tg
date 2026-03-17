@@ -38,6 +38,8 @@ python -m kx_sidekick
 - Run once: `python -m kx_sidekick`
 - Long-running worker: `python -m kx_sidekick worker`
 - Environment check: `python -m kx_sidekick check`
+- Download stored media: `python -m kx_sidekick media-down`
+- Clear old messages and media files: `python -m kx_sidekick clear`
 
 `check` validates config loading, Telegram bot/chat access, PostgreSQL connectivity,
 cache and log directory writability, and Supervisor log rotation settings. If a
@@ -56,6 +58,8 @@ Telegram:
 - `KX_SIDEKICK_ERROR_CHAT_ID`: optional chat or group ID for exit-error alerts
 - `KX_SIDEKICK_POLLING_BATCH_SIZE`: Bot API `getUpdates` batch size
 - `KX_SIDEKICK_POLLING_INTERVAL_SECONDS`: delay between polling cycles
+- `KX_SIDEKICK_CLEAR_MESSAGES_DAYS`: optional message retention window for worker daily cleanup
+- `KX_SIDEKICK_CLEAR_MEDIA_DAYS`: optional media retention window for worker daily cleanup
 
 PostgreSQL:
 
@@ -77,7 +81,7 @@ Never commit real credentials.
 
 ## PostgreSQL schema
 
-- Table SQL: `docs/table.sql`
+- Table SQL: `deploy/table.sql`
 - Main tables:
   - `kx_telegram_messages`
   - `kx_telegram_cursors`
@@ -96,12 +100,19 @@ Example supervisor config:
 - Server deployment guide: `docs/deploy_server.md`
 - Concurrency notes: `docs/concurrency.md`
 
+When `KX_SIDEKICK_CLEAR_MESSAGES_DAYS` or `KX_SIDEKICK_CLEAR_MEDIA_DAYS` is set,
+the `worker` process runs the same cleanup logic as `clear` once per UTC day.
+The example supervisor config also includes a separate `kx_sidekick_media_down`
+process that keeps `media-down` running. When no new media is available,
+`media-down` logs an idle message, waits 10 minutes, and checks again.
+
 Reload steps after copying the config:
 
 ```bash
 supervisorctl reread
 supervisorctl update
 supervisorctl restart kx_sidekick
+supervisorctl restart kx_sidekick_media_down
 ```
 
 ## Project layout
@@ -109,7 +120,7 @@ supervisorctl restart kx_sidekick
 ```text
 src/kx_sidekick/          application code
 tests/                    automated tests
-docs/table.sql            PostgreSQL schema
+deploy/table.sql          PostgreSQL schema
 deploy/supervisor/        supervisor example config
 state/                    local dedupe cache state
 logs/                     supervisor-managed logs

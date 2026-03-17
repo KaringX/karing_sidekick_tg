@@ -10,7 +10,7 @@ from psycopg.types.json import Jsonb
 
 from kx_sidekick.config import DatabaseConfig
 from kx_sidekick.errors import DatabaseError
-from kx_sidekick.models import FetchCursor, MessageRecord
+from kx_sidekick.models import FetchCursor, MediaDownloadRecord, MessageRecord
 
 LOGGER = logging.getLogger(__name__)
 MAX_DB_RECONNECT_ATTEMPTS = 3
@@ -147,6 +147,71 @@ class PostgresStorage:
                 )
 
         self._run_with_retry("save_cursor", operation)
+
+    def list_media_messages_after_id(
+        self,
+        after_id: int,
+        kinds: tuple[str, ...],
+        limit: int,
+    ) -> list[MediaDownloadRecord]:
+        def operation(connection: psycopg.Connection[Any]) -> list[MediaDownloadRecord]:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, posted_at_utc, media_kind, media
+                    FROM kx_telegram_messages
+                    WHERE id > %(after_id)s
+                      AND media_kind = ANY(%(kinds)s)
+                      AND media IS NOT NULL
+                    ORDER BY id ASC
+                    LIMIT %(limit)s
+                    """,
+                    {
+                        "after_id": after_id,
+                        "kinds": list(kinds),
+                        "limit": limit,
+                    },
+                )
+                rows = cursor.fetchall()
+
+            records: list[MediaDownloadRecord] = []
+            for row in rows:
+                message_id, posted_at_utc, media_kind, media = row
+                if not isinstance(message_id, int):
+                    raise DatabaseError("Media query returned a non-integer id")
+                if not isinstance(media_kind, str):
+                    raise DatabaseError("Media query returned a non-string media_kind")
+                if not isinstance(media, dict):
+                    raise DatabaseError(
+                        "Media query returned a non-object media payload"
+                    )
+                records.append(
+                    MediaDownloadRecord(
+                        id=message_id,
+                        posted_at_utc=posted_at_utc,
+                        media_kind=media_kind,
+                        media=media,
+                    )
+                )
+            return records
+
+        return self._run_with_retry("list_media_messages_after_id", operation)
+
+    def delete_messages_older_than(self, days: int) -> int:
+        def operation(connection: psycopg.Connection[Any]) -> int:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM kx_telegram_messages
+                    WHERE posted_at_utc < NOW() - (%s * INTERVAL '1 day')
+                    RETURNING 1
+                    """,
+                    (days,),
+                )
+                rows = cursor.fetchall()
+            return len(rows)
+
+        return self._run_with_retry("delete_messages_older_than", operation)
 
     def _connect(self) -> psycopg.Connection[Any]:
         try:
