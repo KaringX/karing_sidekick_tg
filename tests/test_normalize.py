@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tg_digest.ingest.normalize import build_fingerprint, message_from_bot_update
+from kx_sidekick.ingest.normalize import build_fingerprint, message_from_bot_update
 
 
 def test_message_from_bot_update_normalizes_text() -> None:

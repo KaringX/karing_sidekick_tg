@@ -3,13 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tg-digest"
+name = "karing_sidekick_tg"
 version = "0.1.0"
-description = "Telegram daily digest prototype for tutorial and troubleshooting content"
+description = "Telegram ingestion worker for Karing sidekick operations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.27,<1.0",
+  "psycopg[binary]>=3.2,<4.0",
 ]
 
 [project.optional-dependencies]
@@ -38,4 +39,4 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["tg_digest"]
+packages = ["kx_sidekick"]

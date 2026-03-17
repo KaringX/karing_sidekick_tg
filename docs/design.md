@@ -1,6 +1,7 @@
-# 设计说明
+# Design Notes
 
-- 统一领域模型：业务层不直接使用 Bot API 原始返回。
-- 双后端兼容：先做 Bot API，保留 MTProto 适配器接口。
-- 文件存储优先：先用 JSON 文件归档，便于调试与测试。
-- 规则选文优先：第一版不引入 LLM，仅使用确定性过滤与打分。
+- Normalize Telegram payloads before they reach service logic.
+- Keep Bot API polling as the active integration path and reserve MTProto for a later phase.
+- Use PostgreSQL as the primary system of record for messages and cursors.
+- Use in-memory plus local state-file deduplication to reduce duplicate writes to a remote database.
+- Exit cleanly after repeated Telegram or PostgreSQL failures so `supervisor` can restart the worker.

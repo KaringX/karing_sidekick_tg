@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from tg_digest.ingest.dedupe import dedupe_messages
-from tg_digest.models import ChatRef, MessageRecord
+from kx_sidekick.ingest.dedupe import dedupe_messages
+from kx_sidekick.models import ChatRef, MessageRecord
 
 
 def _message(message_id: str, text: str, fingerprint: str | None) -> MessageRecord:

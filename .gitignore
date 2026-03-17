@@ -1,8 +1,10 @@
 .env
 .venv/
+src/*.egg-info/
 __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 data/
 logs/
+state/

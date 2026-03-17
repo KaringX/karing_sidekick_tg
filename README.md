@@ -1,90 +1,109 @@
-# tg-digest
+# karing_sidekick_tg
 
-一个用于实验的 Telegram 内容提取项目。
+Follow the Telegram group to listen to the concerns of everyone.
 
-目标：从群组或频道消息中，每天筛选 1-3 条适合写成文章的候选内容，主题聚焦在 APP 使用教学、故障排查和实用修复方案。
+`karing_sidekick_tg` is a Telegram ingestion worker focused on collecting real user feedback from selected groups or channels. It pulls messages through the Telegram Bot API, normalizes the content, applies lightweight deduplication, and stores the results in PostgreSQL.
 
-## 当前阶段
+## What it does
 
-- 第一版优先支持 `Bot API polling`
-- `MTProto` 已预留抽象接口，但暂未接入具体实现
-- 聊天内容按天存储为 JSON 文件
+- Polls Telegram updates from allowed chats only
+- Normalizes message text and preserves raw text
+- Uses in-memory and local state-file deduplication before database writes
+- Stores messages and polling cursors in PostgreSQL
+- Runs under `supervisor` so the process can exit cleanly on repeated failures
 
-## 推荐命令
+## Runtime behavior
 
-如果安装了 `uv`：
+- Telegram request timeout: `30s`
+- Telegram request retries: `3`
+- PostgreSQL connect timeout: `60s`
+- PostgreSQL statement timeout: default `60000 ms`
+- PostgreSQL reconnect retries during runtime: `3`
+- On repeated Telegram or PostgreSQL failures, the worker logs the error and exits; `supervisor` should restart it
 
-```bash
-uv venv
-uv sync --extra dev
-uv run python -m tg_digest
-uv run python -m tg_digest worker
-uv run ruff check .
-uv run ruff format .
-uv run mypy src tests
-uv run pytest
-uv run pytest tests/test_select.py::test_select_candidates_limits_count
-```
-
-如果没有 `uv`：
+## Quick start
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
-python -m tg_digest
-python -m tg_digest worker
-pytest
+cp .env.example .env
+python -m kx_sidekick
 ```
 
-## 环境变量
+## Run modes
 
-程序启动时会优先读取根目录 `.env`，再读取当前 shell 环境变量。
-建议先执行：
+- Run once: `python -m kx_sidekick`
+- Long-running worker: `python -m kx_sidekick worker`
+
+## Environment variables
+
+The app loads `.env` from the repository root, then falls back to shell environment variables.
+
+Telegram:
+
+- `KX_SIDEKICK_TELEGRAM_MODE`: currently `bot_api`
+- `KX_SIDEKICK_BOT_TOKEN`: Telegram bot token
+- `KX_SIDEKICK_BOT_ALLOWED_CHAT_IDS`: comma-separated allowed chat IDs
+- `KX_SIDEKICK_POLLING_BATCH_SIZE`: Bot API `getUpdates` batch size
+- `KX_SIDEKICK_POLLING_INTERVAL_SECONDS`: delay between polling cycles
+
+PostgreSQL:
+
+- `KX_SIDEKICK_DB_HOST`: required
+- `KX_SIDEKICK_DB_PORT`: default `5432`
+- `KX_SIDEKICK_DB_NAME`: required
+- `KX_SIDEKICK_DB_USER`: required
+- `KX_SIDEKICK_DB_PASSWORD`: required
+- `KX_SIDEKICK_DB_SSLMODE`: default `disable`
+- `KX_SIDEKICK_DB_STATEMENT_TIMEOUT_MS`: default `60000`
+
+Local dedupe state:
+
+- `KX_SIDEKICK_STATE_DIR`: default `state`
+- `KX_SIDEKICK_DEDUPE_TTL_SECONDS`: default `86400`
+- `KX_SIDEKICK_DEDUPE_MAX_KEYS`: default `10000`
+
+Never commit real credentials.
+
+## PostgreSQL schema
+
+- Table SQL: `docs/table.sql`
+- Main tables:
+  - `kx_telegram_messages`
+  - `kx_telegram_cursors`
+
+The message table stores both normalized `text` and original `raw_text`, plus lightweight Telegram metadata in `raw_summary`.
+
+## Supervisor
+
+Recommended deploy path:
+
+- `/opt/KaringX/karing_sidekick`
+
+Example supervisor config:
+
+- `deploy/supervisor/kx_sidekick.conf`
+
+Reload steps after copying the config:
 
 ```bash
-cp .env.example .env
+supervisorctl reread
+supervisorctl update
+supervisorctl restart kx_sidekick
 ```
 
-然后把真实的 bot token 和群组 id 写入 `.env`。
+## Project layout
 
-- `TG_DIGEST_BOT_TOKEN`: Telegram Bot Token
-- `TG_DIGEST_BOT_ALLOWED_CHAT_IDS`: 允许采集的 chat id，逗号分隔
-- `TG_DIGEST_DATA_DIR`: 数据目录
-- `TG_DIGEST_TIMEZONE`: 业务时区，当前默认 `UTC`
-- `TG_DIGEST_POLLING_BATCH_SIZE`: 每轮 `getUpdates` 的批大小
-- `TG_DIGEST_POLLING_INTERVAL_SECONDS`: worker 每轮轮询之间的等待秒数
+```text
+src/kx_sidekick/          application code
+tests/                    automated tests
+docs/table.sql            PostgreSQL schema
+deploy/supervisor/        supervisor example config
+state/                    local dedupe cache state
+logs/                     supervisor-managed logs
+```
 
-## 数据目录
+## Theme
 
-每日运行会在 `data/daily/YYYY-MM-DD/` 下生成：
-
-- `messages.json`
-- `candidates.json`
-- `summary.json`
-- `cursors.json`
-
-`messages.json` 中会同时保存：
-
-- 标准化后的 `text`
-- 原始输入的 `raw_text`
-
-这样即使群里出现“中文提问 + 英文回答”或其他混合语言对话，原始信息也会先被完整归档，方便后续再做更细分析。
-
-## 说明
-
-当前轮询实现会基于 `cursors.json` 中记录的 `offset` 持续增量抓取 `getUpdates`。
-Bot API 在历史消息拉取方面能力有限，因此当前实现更偏向增量采集与本地归档。
-后续接入 `MTProto` 后，可用于补拉历史消息。
-
-## 运行方式
-
-- 单次执行：`python -m tg_digest`
-- 长期轮询 worker：`python -m tg_digest worker`
-
-如果你已经配好了 `.env`，直接运行 worker 即可，它会：
-
-- 读取 `cursors.json` 中已保存的 offset
-- 循环调用 `getUpdates` 增量抓取
-- 追加归档到当天 `messages.json`
-- 重新生成当天候选结果与 summary
+This project is intentionally narrow: follow the Telegram group to listen to the concerns of everyone, keep the raw discussion intact, and make sure useful feedback is stored reliably for later analysis.
