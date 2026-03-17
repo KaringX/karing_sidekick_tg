@@ -16,3 +16,7 @@ class DatabaseError(KxSidekickError):
 
 class UnsupportedModeError(KxSidekickError):
     """Raised when a collector mode is declared but not implemented."""
+
+
+class NotificationError(KxSidekickError):
+    """Raised when sending an exit notification fails."""

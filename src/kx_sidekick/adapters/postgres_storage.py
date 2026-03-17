@@ -27,6 +27,9 @@ class PostgresStorage:
             return
         self._connection = self._connect()
 
+    def close(self) -> None:
+        self._reset_connection()
+
     def save_messages(self, messages: list[MessageRecord]) -> int:
         if not messages:
             return 0

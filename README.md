@@ -19,7 +19,8 @@ Follow the Telegram group to listen to the concerns of everyone.
 - PostgreSQL connect timeout: `60s`
 - PostgreSQL statement timeout: default `60000 ms`
 - PostgreSQL reconnect retries during runtime: `3`
-- On repeated Telegram or PostgreSQL failures, the worker logs the error and exits; `supervisor` should restart it
+- On repeated Telegram or PostgreSQL failures, the worker logs the full traceback locally, sends a compact Telegram exit alert, and exits; `supervisor` should restart it
+- After the next successful cycle, the worker sends a one-time Telegram recovery alert
 
 ## Quick start
 
@@ -28,6 +29,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
 cp .env.example .env
+python -m kx_sidekick check
 python -m kx_sidekick
 ```
 
@@ -35,6 +37,12 @@ python -m kx_sidekick
 
 - Run once: `python -m kx_sidekick`
 - Long-running worker: `python -m kx_sidekick worker`
+- Environment check: `python -m kx_sidekick check`
+
+`check` validates config loading, Telegram bot/chat access, PostgreSQL connectivity,
+cache and log directory writability, and Supervisor log rotation settings. If a
+required runtime directory is not writable, the checker will try `chmod 777`
+once and report that repair attempt in the output.
 
 ## Environment variables
 
@@ -45,6 +53,7 @@ Telegram:
 - `KX_SIDEKICK_TELEGRAM_MODE`: currently `bot_api`
 - `KX_SIDEKICK_BOT_TOKEN`: Telegram bot token
 - `KX_SIDEKICK_BOT_ALLOWED_CHAT_IDS`: comma-separated allowed chat IDs
+- `KX_SIDEKICK_ERROR_CHAT_ID`: optional chat or group ID for exit-error alerts
 - `KX_SIDEKICK_POLLING_BATCH_SIZE`: Bot API `getUpdates` batch size
 - `KX_SIDEKICK_POLLING_INTERVAL_SECONDS`: delay between polling cycles
 

@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from kx_sidekick.errors import CollectorError
+from kx_sidekick.errors import CollectorError, NotificationError
 from kx_sidekick.ingest.normalize import message_from_bot_update
 from kx_sidekick.models import FetchCursor, MessageRecord
 
@@ -16,6 +16,7 @@ LOGGER = logging.getLogger(__name__)
 CURSOR_KEY = "bot_api:updates"
 REQUEST_TIMEOUT_SECONDS = 30.0
 MAX_REQUEST_ATTEMPTS = 3
+API_POST_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass
@@ -150,3 +151,81 @@ class BotApiCollector:
         timeout = httpx.Timeout(REQUEST_TIMEOUT_SECONDS)
         async with httpx.AsyncClient(timeout=timeout) as client:
             return await client.get(url, params=params)
+
+
+@dataclass
+class BotApiNotifier:
+    bot_token: str
+    base_url: str = "https://api.telegram.org"
+
+    async def get_me(self) -> dict[str, Any]:
+        result = await self._call_api(method_name="getMe", payload={})
+        return self._require_dict_result(result, "Telegram getMe returned a non-object")
+
+    async def get_chat(self, chat_id: str) -> dict[str, Any]:
+        result = await self._call_api(
+            method_name="getChat",
+            payload={"chat_id": chat_id},
+        )
+        return self._require_dict_result(
+            result,
+            "Telegram getChat returned a non-object",
+        )
+
+    async def send_message(self, chat_id: str, text: str) -> None:
+        result = await self._call_api(
+            method_name="sendMessage",
+            payload={
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": True,
+            },
+        )
+        self._require_dict_result(result, "Telegram sendMessage returned a non-object")
+
+    async def _call_api(
+        self, method_name: str, payload: dict[str, object]
+    ) -> dict[str, Any] | list[Any]:
+        url = f"{self.base_url}/bot{self.bot_token}/{method_name}"
+
+        try:
+            response = await self._post_message(url=url, payload=payload)
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            raise NotificationError(f"Telegram {method_name} request failed") from exc
+
+        if response.status_code >= 400:
+            raise NotificationError(
+                f"Telegram {method_name} failed with status {response.status_code}"
+            )
+
+        try:
+            response_payload = response.json()
+        except JSONDecodeError as exc:
+            raise NotificationError(
+                f"Telegram {method_name} returned invalid JSON"
+            ) from exc
+
+        if not isinstance(response_payload, dict) or not response_payload.get("ok"):
+            raise NotificationError(
+                f"Telegram {method_name} failed: {response_payload}"
+            )
+
+        result = response_payload.get("result")
+        if not isinstance(result, dict | list):
+            raise NotificationError(
+                f"Telegram {method_name} returned an unsupported result type"
+            )
+        return result
+
+    @staticmethod
+    def _require_dict_result(result: object, error_message: str) -> dict[str, Any]:
+        if not isinstance(result, dict):
+            raise NotificationError(error_message)
+        return result
+
+    async def _post_message(
+        self, url: str, payload: dict[str, object]
+    ) -> httpx.Response:
+        timeout = httpx.Timeout(API_POST_TIMEOUT_SECONDS)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            return await client.post(url, json=payload)

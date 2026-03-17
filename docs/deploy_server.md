@@ -37,7 +37,9 @@ uv sync --extra dev
 cp .env.example .env
 ```
 
-Edit `.env` and fill in the real Telegram and PostgreSQL values.
+Edit `.env` and fill in the real Telegram and PostgreSQL values. If you want
+the worker to send a Telegram alert before exiting on failure, also set
+`KX_SIDEKICK_ERROR_CHAT_ID` to the target group or chat ID.
 
 ## Initialize PostgreSQL
 

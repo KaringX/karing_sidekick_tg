@@ -72,10 +72,36 @@ class AppConfig:
     telegram_mode: str
     bot_token: str | None
     allowed_chat_ids: tuple[str, ...]
+    error_chat_id: str | None
     polling_batch_size: int
     polling_interval_seconds: int
     database: DatabaseConfig
     dedupe: DedupeConfig
+
+
+@dataclass(frozen=True)
+class ErrorNotificationConfig:
+    bot_token: str
+    chat_id: str
+    state_dir: Path
+
+    @property
+    def state_file(self) -> Path:
+        return self.state_dir / "error_notification_state.json"
+
+
+def load_error_notification_config() -> ErrorNotificationConfig | None:
+    _load_dotenv(Path(".env"))
+
+    bot_token = os.getenv("KX_SIDEKICK_BOT_TOKEN")
+    chat_id = os.getenv("KX_SIDEKICK_ERROR_CHAT_ID")
+    if not bot_token or not chat_id:
+        return None
+    return ErrorNotificationConfig(
+        bot_token=bot_token,
+        chat_id=chat_id,
+        state_dir=Path(os.getenv("KX_SIDEKICK_STATE_DIR", "state")),
+    )
 
 
 def load_config() -> AppConfig:
@@ -119,6 +145,7 @@ def load_config() -> AppConfig:
         telegram_mode=telegram_mode,
         bot_token=bot_token,
         allowed_chat_ids=allowed_chat_ids,
+        error_chat_id=os.getenv("KX_SIDEKICK_ERROR_CHAT_ID"),
         polling_batch_size=_get_positive_int("KX_SIDEKICK_POLLING_BATCH_SIZE", "100"),
         polling_interval_seconds=_get_positive_int(
             "KX_SIDEKICK_POLLING_INTERVAL_SECONDS", "30"

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kx_sidekick.config import load_config
+from kx_sidekick.config import load_config, load_error_notification_config
 
 
 def test_load_config_reads_values_and_defaults(
@@ -17,6 +17,7 @@ def test_load_config_reads_values_and_defaults(
                 "KX_SIDEKICK_TELEGRAM_MODE=bot_api",
                 "KX_SIDEKICK_BOT_TOKEN=test-token",
                 "KX_SIDEKICK_BOT_ALLOWED_CHAT_IDS=-1001,-1002",
+                "KX_SIDEKICK_ERROR_CHAT_ID=-1009",
                 "KX_SIDEKICK_POLLING_BATCH_SIZE=55",
                 "KX_SIDEKICK_POLLING_INTERVAL_SECONDS=9",
                 "KX_SIDEKICK_DB_HOST=127.0.0.1",
@@ -32,6 +33,7 @@ def test_load_config_reads_values_and_defaults(
     for key in [
         "KX_SIDEKICK_BOT_TOKEN",
         "KX_SIDEKICK_BOT_ALLOWED_CHAT_IDS",
+        "KX_SIDEKICK_ERROR_CHAT_ID",
         "KX_SIDEKICK_POLLING_BATCH_SIZE",
         "KX_SIDEKICK_POLLING_INTERVAL_SECONDS",
         "KX_SIDEKICK_DB_HOST",
@@ -51,9 +53,35 @@ def test_load_config_reads_values_and_defaults(
 
     assert config.bot_token == "test-token"
     assert config.allowed_chat_ids == ("-1001", "-1002")
+    assert config.error_chat_id == "-1009"
     assert config.polling_batch_size == 55
     assert config.polling_interval_seconds == 9
     assert config.database.port == 5432
     assert config.database.sslmode == "disable"
     assert config.database.statement_timeout_ms == 60000
     assert config.dedupe.state_file == Path("state") / "dedupe_cache.json"
+
+
+def test_load_error_notification_config_reads_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "KX_SIDEKICK_BOT_TOKEN=test-token",
+                "KX_SIDEKICK_ERROR_CHAT_ID=-1009",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("KX_SIDEKICK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("KX_SIDEKICK_ERROR_CHAT_ID", raising=False)
+
+    config = load_error_notification_config()
+
+    assert config is not None
+    assert config.bot_token == "test-token"
+    assert config.chat_id == "-1009"
+    assert config.state_file == Path("state") / "error_notification_state.json"
