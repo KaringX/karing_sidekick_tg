@@ -84,6 +84,8 @@ Recommended deploy path:
 Example supervisor config:
 
 - `deploy/supervisor/kx_sidekick.conf`
+- Server deployment guide: `docs/deploy_server.md`
+- Concurrency notes: `docs/concurrency.md`
 
 Reload steps after copying the config:
 
