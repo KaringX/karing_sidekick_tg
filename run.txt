@@ -1,1 +1,0 @@
-Use supervisor with `deploy/supervisor/kx_sidekick.conf`.

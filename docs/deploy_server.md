@@ -58,7 +58,14 @@ If you do not want to export shell variables first, replace them with explicit v
 
 ## Verify the Worker Manually
 
-Run one ingestion cycle before enabling supervisor:
+Run the built-in environment check first:
+
+```bash
+cd /opt/KaringX/karing_sidekick
+uv run python -m kx_sidekick check
+```
+
+If the checker passes, run one ingestion cycle before enabling supervisor:
 
 ```bash
 cd /opt/KaringX/karing_sidekick
@@ -89,6 +96,19 @@ Start or restart the worker:
 sudo supervisorctl start kx_sidekick
 sudo supervisorctl restart kx_sidekick
 ```
+
+After the process is up, complete these runtime checks:
+
+```bash
+sudo supervisorctl status kx_sidekick
+tail -f /opt/KaringX/karing_sidekick/logs/kx_sidekick.stderr.log
+ls -l /opt/KaringX/karing_sidekick/state/dedupe_cache.json
+```
+
+Expected results:
+
+- `logs/kx_sidekick.stderr.log` does not show repeated startup, Telegram, or PostgreSQL errors
+- `state/dedupe_cache.json` exists after the worker begins processing messages
 
 ## Logs and Runtime Files
 
