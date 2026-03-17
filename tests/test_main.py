@@ -7,7 +7,7 @@ import tempfile
 from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -134,6 +134,28 @@ def test_send_recovery_notification_uses_compact_message_and_clears_state(
         "prev_err=kx_sidekick.errors.ConfigError: broken config" in sent_messages[0][1]
     )
     assert not notification_config.state_file.exists()
+
+
+def test_run_once_awaits_recovery_notification(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[str] = []
+
+    class FakeService:
+        async def run_once(self) -> dict[str, object]:
+            return {"run_status": "ok", "stored": 1}
+
+    async def fake_notify_recovery(mode: str) -> None:
+        calls.append(mode)
+
+    monkeypatch.setattr(main_module, "_notify_recovery", fake_notify_recovery)
+
+    exit_code = asyncio.run(main_module._run_once(cast(Any, FakeService())))
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert calls == ["run-once"]
+    assert '"stored": 1' in output
 
 
 def test_run_check_reports_success_for_ready_dependencies(

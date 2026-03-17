@@ -404,16 +404,16 @@ def _notify_exit_error(exc: BaseException, mode: str) -> None:
         LOGGER.exception("error_notification_failed")
 
 
-def _notify_recovery(mode: str) -> None:
+async def _notify_recovery(mode: str) -> None:
     try:
-        asyncio.run(_send_recovery_notification(mode))
+        await _send_recovery_notification(mode)
     except Exception:
         LOGGER.exception("recovery_notification_failed")
 
 
 async def _run_once(service: TelegramIngestionService) -> int:
     summary = await service.run_once()
-    _notify_recovery("run-once")
+    await _notify_recovery("run-once")
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 0
 
@@ -426,7 +426,7 @@ async def _run_worker(service: TelegramIngestionService, interval_seconds: int) 
     )
     while True:
         summary = await service.run_once()
-        _notify_recovery("worker")
+        await _notify_recovery("worker")
         LOGGER.info(
             "worker_iteration_completed stats=%s", json.dumps(summary, sort_keys=True)
         )
