@@ -43,6 +43,7 @@ class MessageRecord:
     author: AuthorRef = field(default_factory=AuthorRef)
     edited_at_utc: datetime | None = None
     media_kind: str | None = None
+    media: dict[str, object] | None = None
     stats: MessageStats = field(default_factory=MessageStats)
     link: str | None = None
     fingerprint: str | None = None
@@ -94,6 +95,7 @@ class MessageRecord:
                 else None
             ),
             media_kind=_optional_str(data.get("media_kind")),
+            media=_optional_json_object(data.get("media")),
             stats=MessageStats(
                 views=_optional_int(stats_data.get("views")),
                 forwards=_optional_int(stats_data.get("forwards")),
@@ -134,3 +136,11 @@ def _json_scalar(value: object) -> str | int | None:
     if isinstance(value, int):
         return value
     return str(value)
+
+
+def _optional_json_object(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError(f"Unsupported JSON object value: {value!r}")
+    return value

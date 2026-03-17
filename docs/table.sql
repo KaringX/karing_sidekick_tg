@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS kx_telegram_messages (
     author_id TEXT,
     author_name TEXT,
     media_kind TEXT,
+    media JSONB,
     link TEXT,
     fingerprint TEXT,
     raw_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -63,6 +64,7 @@ COMMENT ON COLUMN kx_telegram_messages.raw_text IS 'Original Telegram text or ca
 COMMENT ON COLUMN kx_telegram_messages.author_id IS 'Telegram sender identifier when available.';
 COMMENT ON COLUMN kx_telegram_messages.author_name IS 'Sender display name derived from first_name, last_name, or username.';
 COMMENT ON COLUMN kx_telegram_messages.media_kind IS 'Detected media kind such as photo, video, document, animation, or audio.';
+COMMENT ON COLUMN kx_telegram_messages.media IS 'Telegram media metadata used for later file retrieval, including file_id and type-specific details.';
 COMMENT ON COLUMN kx_telegram_messages.link IS 'Public t.me link built from chat username and message id when possible.';
 COMMENT ON COLUMN kx_telegram_messages.fingerprint IS 'Hash of normalized long text used for lightweight duplicate detection.';
 COMMENT ON COLUMN kx_telegram_messages.raw_summary IS 'Compact JSONB payload with selected raw Telegram metadata such as update_id.';

@@ -29,6 +29,22 @@ def test_bot_api_adapter_fetches_allowed_chat_messages() -> None:
                             "text": (
                                 "fix login timeout step 1 clear cache and retry now"
                             ),
+                            "photo": [
+                                {
+                                    "file_id": "photo-small",
+                                    "file_unique_id": "photo-uniq-small",
+                                    "file_size": 64,
+                                    "width": 40,
+                                    "height": 40,
+                                },
+                                {
+                                    "file_id": "photo-large",
+                                    "file_unique_id": "photo-uniq-large",
+                                    "file_size": 256,
+                                    "width": 400,
+                                    "height": 400,
+                                },
+                            ],
                             "chat": {
                                 "id": -1001,
                                 "type": "supergroup",
@@ -55,6 +71,35 @@ def test_bot_api_adapter_fetches_allowed_chat_messages() -> None:
     assert calls == [None]
     assert len(messages) == 1
     assert messages[0].chat.chat_id == "-1001"
+    assert messages[0].media_kind == "photo"
+    assert messages[0].media == {
+        "kind": "photo",
+        "telegram": {
+            "file_id": "photo-large",
+            "file_unique_id": "photo-uniq-large",
+            "file_size": 256,
+        },
+        "photo": {
+            "width": 400,
+            "height": 400,
+            "variants": [
+                {
+                    "file_id": "photo-small",
+                    "file_unique_id": "photo-uniq-small",
+                    "file_size": 64,
+                    "width": 40,
+                    "height": 40,
+                },
+                {
+                    "file_id": "photo-large",
+                    "file_unique_id": "photo-uniq-large",
+                    "file_size": 256,
+                    "width": 400,
+                    "height": 400,
+                },
+            ],
+        },
+    }
     assert cursor is not None
     assert cursor.value == "12"
 

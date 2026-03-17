@@ -42,6 +42,7 @@ def message_from_bot_update(update: dict[str, Any]) -> MessageRecord | None:
         else None
     )
     media_kind = _detect_media_kind(message)
+    media = _extract_media_payload(message, media_kind)
     username = chat.get("username")
     message_id = str(message["message_id"])
     chat_id = str(chat["id"])
@@ -66,6 +67,7 @@ def message_from_bot_update(update: dict[str, Any]) -> MessageRecord | None:
             author_name=_author_name(message.get("from")),
         ),
         media_kind=media_kind,
+        media=media,
         stats=MessageStats(),
         link=link,
         fingerprint=build_fingerprint(text),
@@ -93,3 +95,127 @@ def _detect_media_kind(message: dict[str, Any]) -> str | None:
         if key in message:
             return key
     return None
+
+
+def _extract_media_payload(
+    message: dict[str, Any], media_kind: str | None
+) -> dict[str, object] | None:
+    if media_kind is None:
+        return None
+
+    if media_kind == "photo":
+        return _extract_photo_payload(message)
+
+    media_value = message.get(media_kind)
+    if not isinstance(media_value, dict):
+        return None
+
+    payload: dict[str, object] = {
+        "kind": media_kind,
+        "telegram": _compact_dict(
+            {
+                "file_id": _optional_string(media_value.get("file_id")),
+                "file_unique_id": _optional_string(media_value.get("file_unique_id")),
+                "file_size": _optional_integer(media_value.get("file_size")),
+            }
+        ),
+        media_kind: _compact_dict(
+            {
+                "width": _optional_integer(media_value.get("width")),
+                "height": _optional_integer(media_value.get("height")),
+                "duration_seconds": _optional_integer(media_value.get("duration")),
+                "mime_type": _optional_string(media_value.get("mime_type")),
+                "file_name": _optional_string(media_value.get("file_name")),
+                "thumbnail_file_id": _thumbnail_file_id(media_value),
+            }
+        ),
+    }
+    caption = message.get("caption")
+    if isinstance(caption, str) and caption:
+        payload["caption"] = caption
+    return payload
+
+
+def _extract_photo_payload(message: dict[str, Any]) -> dict[str, object] | None:
+    photo_sizes = message.get("photo")
+    if not isinstance(photo_sizes, list) or not photo_sizes:
+        return None
+
+    best_photo = next(
+        (
+            item
+            for item in reversed(photo_sizes)
+            if isinstance(item, dict) and item.get("file_id")
+        ),
+        None,
+    )
+    if best_photo is None:
+        return None
+
+    payload: dict[str, object] = {
+        "kind": "photo",
+        "telegram": _compact_dict(
+            {
+                "file_id": _optional_string(best_photo.get("file_id")),
+                "file_unique_id": _optional_string(best_photo.get("file_unique_id")),
+                "file_size": _optional_integer(best_photo.get("file_size")),
+            }
+        ),
+        "photo": _compact_dict(
+            {
+                "width": _optional_integer(best_photo.get("width")),
+                "height": _optional_integer(best_photo.get("height")),
+                "variants": _photo_variants(photo_sizes),
+            }
+        ),
+    }
+    caption = message.get("caption")
+    if isinstance(caption, str) and caption:
+        payload["caption"] = caption
+    return payload
+
+
+def _photo_variants(photo_sizes: list[object]) -> list[dict[str, object]]:
+    variants: list[dict[str, object]] = []
+    for item in photo_sizes:
+        if not isinstance(item, dict):
+            continue
+        file_id = _optional_string(item.get("file_id"))
+        if file_id is None:
+            continue
+        variant = _compact_dict(
+            {
+                "file_id": file_id,
+                "file_unique_id": _optional_string(item.get("file_unique_id")),
+                "file_size": _optional_integer(item.get("file_size")),
+                "width": _optional_integer(item.get("width")),
+                "height": _optional_integer(item.get("height")),
+            }
+        )
+        variants.append(variant)
+    return variants
+
+
+def _thumbnail_file_id(media_value: dict[str, Any]) -> str | None:
+    thumbnail = media_value.get("thumbnail") or media_value.get("thumb")
+    if not isinstance(thumbnail, dict):
+        return None
+    return _optional_string(thumbnail.get("file_id"))
+
+
+def _optional_string(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_integer(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    return None
+
+
+def _compact_dict(values: dict[str, object | None]) -> dict[str, object]:
+    return {key: value for key, value in values.items() if value is not None}

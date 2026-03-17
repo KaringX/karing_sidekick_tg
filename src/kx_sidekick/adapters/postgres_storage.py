@@ -55,6 +55,7 @@ class PostgresStorage:
                             author_id,
                             author_name,
                             media_kind,
+                            media,
                             link,
                             fingerprint,
                             raw_summary
@@ -74,6 +75,7 @@ class PostgresStorage:
                             %(author_id)s,
                             %(author_name)s,
                             %(media_kind)s,
+                            %(media)s,
                             %(link)s,
                             %(fingerprint)s,
                             %(raw_summary)s
@@ -96,6 +98,7 @@ class PostgresStorage:
                             "author_id": message.author.author_id,
                             "author_name": message.author.author_name,
                             "media_kind": message.media_kind,
+                            "media": Jsonb(message.media) if message.media else None,
                             "link": message.link,
                             "fingerprint": message.fingerprint,
                             "raw_summary": Jsonb(message.raw_summary),

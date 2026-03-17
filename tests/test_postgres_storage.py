@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import MethodType
 from typing import Any, cast
 
 import pytest
+from psycopg.types.json import Jsonb
 
 from kx_sidekick.adapters.postgres_storage import PostgresStorage
 from kx_sidekick.config import DatabaseConfig
+from kx_sidekick.models import ChatRef, MessageRecord
 
 
 class RecoverableError(Exception):
@@ -63,3 +66,53 @@ def test_postgres_storage_retries_recoverable_errors(
 
     assert storage._run_with_retry("save_messages", cast(Any, operation)) == 7
     assert len(connect_calls) == 3
+
+
+def test_postgres_storage_save_messages_writes_media_jsonb() -> None:
+    storage = PostgresStorage(_config())
+    captured_params: list[dict[str, object]] = []
+
+    class FakeCursor:
+        def __enter__(self) -> FakeCursor:
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            del exc_type, exc, tb
+
+        def execute(self, query: str, params: dict[str, object]) -> None:
+            del query
+            captured_params.append(params)
+
+        def fetchone(self) -> tuple[int]:
+            return (1,)
+
+    class SaveConnection(FakeConnection):
+        def cursor(self) -> FakeCursor:
+            return FakeCursor()
+
+    storage._connection = cast(Any, SaveConnection())
+
+    message = MessageRecord(
+        source="bot_api",
+        chat=ChatRef(source="bot_api", chat_id="chat-1", chat_type="supergroup"),
+        message_id="42",
+        posted_at_utc=datetime(2026, 3, 17, tzinfo=UTC),
+        text="video walkthrough",
+        raw_text="video walkthrough",
+        media_kind="video",
+        media={
+            "kind": "video",
+            "telegram": {
+                "file_id": "video-file",
+                "file_unique_id": "video-uniq",
+            },
+        },
+    )
+
+    inserted = storage.save_messages([message])
+
+    assert inserted == 1
+    assert len(captured_params) == 1
+    assert captured_params[0]["media_kind"] == "video"
+    assert isinstance(captured_params[0]["media"], Jsonb)
+    assert captured_params[0]["media"].obj == message.media
